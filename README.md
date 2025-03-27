@@ -7,3 +7,9 @@
 This project is the digital equivalent of duct-taping a banana to a wall and calling it \
 art.\
 
+
+### What This App Does NOT Do
+- Does NOT create legally binding digital signatures
+- Does NOT implement cryptographic security measures
+- Does NOT verify document authenticity
+
