@@ -19,3 +19,11 @@ art.\
 - You think 'security' is a decorative checkbox
 - You enjoy projects that whisper 'this is fine' while everything burns
 
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+<div align='center'><p>Made with ❤️ and questionable life choices</p></div>
