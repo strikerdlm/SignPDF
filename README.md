@@ -13,3 +13,9 @@ art.\
 - Does NOT implement cryptographic security measures
 - Does NOT verify document authenticity
 
+
+## Why Use This?
+- Your lawyer uses emojis in contracts
+- You think 'security' is a decorative checkbox
+- You enjoy projects that whisper 'this is fine' while everything burns
+
