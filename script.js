@@ -5,11 +5,17 @@ class PDFSignOMatic {
         this.pdfFile = null;
         this.signatureFile = null;
         this.pdfDoc = null;
+        this.pdfJsDoc = null;
         this.currentPage = 0;
         this.signaturePosition = { x: 100, y: 100 };
         this.signatureSize = 150;
         this.signatureOpacity = 1;
         this.canvasScale = 1;
+        
+        // Configure PDF.js worker
+        if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+        }
         
         this.initEventListeners();
     }
@@ -76,7 +82,15 @@ class PDFSignOMatic {
             this.showLoading('pdfUpload');
             
             const arrayBuffer = await file.arrayBuffer();
+            
+            // Load PDF with PDF-lib for modification
             this.pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+            
+            // Load PDF with PDF.js for rendering
+            if (typeof pdfjsLib !== 'undefined') {
+                this.pdfJsDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            }
+            
             this.pdfFile = file;
             
             this.markUploaded('pdfUpload', '📄 PDF Loaded!');
@@ -87,6 +101,28 @@ class PDFSignOMatic {
         } catch (error) {
             console.error('Error loading PDF:', error);
             this.showError('Failed to load PDF. Please try a different file.');
+            // Reset upload area on error
+            this.resetUploadArea('pdfUpload');
+        }
+    }
+    
+    resetUploadArea(elementId) {
+        const element = document.getElementById(elementId);
+        element.classList.remove('uploaded');
+        const content = element.querySelector('.upload-content');
+        
+        if (elementId === 'pdfUpload') {
+            content.innerHTML = `
+                <div class="upload-icon">📄</div>
+                <h3>Upload PDF Document</h3>
+                <p>Drop your PDF here or click to browse</p>
+            `;
+        } else {
+            content.innerHTML = `
+                <div class="upload-icon">✍️</div>
+                <h3>Upload Signature Image</h3>
+                <p>Drop your PNG signature here or click to browse</p>
+            `;
         }
     }
 
@@ -103,6 +139,7 @@ class PDFSignOMatic {
         } catch (error) {
             console.error('Error loading signature:', error);
             this.showError('Failed to load signature image.');
+            this.resetUploadArea('signatureUpload');
         }
     }
 
@@ -123,7 +160,7 @@ class PDFSignOMatic {
         const pageSelect = document.getElementById('pageSelect');
         pageSelect.innerHTML = '';
         
-        const pageCount = this.pdfDoc.getPageCount();
+        const pageCount = this.pdfJsDoc ? this.pdfJsDoc.numPages : this.pdfDoc.getPageCount();
         for (let i = 0; i < pageCount; i++) {
             const option = document.createElement('option');
             option.value = i;
@@ -133,32 +170,65 @@ class PDFSignOMatic {
     }
 
     async renderPDF() {
+        if (!this.pdfJsDoc) return;
+        
         const canvas = document.getElementById('pdfCanvas');
         const ctx = canvas.getContext('2d');
         
-        // We'll use a simple approach - convert PDF page to image
-        // Note: This is a simplified version. In a real app, you might want to use PDF.js
-        const page = this.pdfDoc.getPage(this.currentPage);
-        const { width, height } = page.getSize();
+        try {
+            // Get the page from PDF.js
+            const page = await this.pdfJsDoc.getPage(this.currentPage + 1); // PDF.js uses 1-based indexing
+            const viewport = page.getViewport({ scale: 1 });
+            
+            // Calculate scale to fit within container
+            const maxWidth = 800;
+            const maxHeight = 600;
+            let scale = Math.min(maxWidth / viewport.width, maxHeight / viewport.height, 1);
+            
+            // Apply scale to viewport
+            const scaledViewport = page.getViewport({ scale });
+            
+            // Set canvas size
+            canvas.width = scaledViewport.width;
+            canvas.height = scaledViewport.height;
+            this.canvasScale = scale;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Render PDF page
+            const renderContext = {
+                canvasContext: ctx,
+                viewport: scaledViewport
+            };
+            
+            await page.render(renderContext).promise;
+            
+            // Update signature preview after rendering
+            this.updateSignaturePreview();
+            
+        } catch (error) {
+            console.error('Error rendering PDF:', error);
+            // Fallback to placeholder if rendering fails
+            this.renderPlaceholder(canvas, ctx);
+        }
+    }
+    
+    renderPlaceholder(canvas, ctx) {
+        // Fallback placeholder rendering
+        canvas.width = 600;
+        canvas.height = 800;
         
-        // Set canvas size
-        const maxWidth = 800;
-        this.canvasScale = Math.min(maxWidth / width, 1);
-        canvas.width = width * this.canvasScale;
-        canvas.height = height * this.canvasScale;
-        
-        // Draw a placeholder for the PDF page
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.strokeStyle = '#cccccc';
         ctx.strokeRect(0, 0, canvas.width, canvas.height);
         
-        // Add some placeholder content
         ctx.fillStyle = '#666666';
         ctx.font = '16px Arial';
         ctx.textAlign = 'center';
         ctx.fillText(`PDF Page ${this.currentPage + 1}`, canvas.width / 2, canvas.height / 2);
-        ctx.fillText('(Preview - actual PDF content will be preserved)', canvas.width / 2, canvas.height / 2 + 30);
+        ctx.fillText('(Preview unavailable - actual PDF content will be preserved)', canvas.width / 2, canvas.height / 2 + 30);
         
         this.updateSignaturePreview();
     }
@@ -283,13 +353,13 @@ class PDFSignOMatic {
 
             // Calculate signature position and size in PDF coordinates
             const canvas = document.getElementById('pdfCanvas');
-            const scaleX = width / canvas.width;
-            const scaleY = height / canvas.height;
             
-            const pdfX = this.signaturePosition.x * scaleX;
-            const pdfY = height - (this.signaturePosition.y + this.signatureSize * 0.5) * scaleY;
-            const pdfWidth = this.signatureSize * scaleX;
-            const pdfHeight = this.signatureSize * 0.5 * scaleY;
+            // Convert from canvas coordinates to PDF coordinates
+            // Note: PDF coordinates have origin at bottom-left, canvas has origin at top-left
+            const pdfX = this.signaturePosition.x / this.canvasScale;
+            const pdfY = height - (this.signaturePosition.y + this.signatureSize * 0.5) / this.canvasScale;
+            const pdfWidth = this.signatureSize / this.canvasScale;
+            const pdfHeight = (this.signatureSize * 0.5) / this.canvasScale;
 
             // Add signature to PDF
             page.drawImage(signatureImage, {
@@ -334,6 +404,7 @@ class PDFSignOMatic {
         this.pdfFile = null;
         this.signatureFile = null;
         this.pdfDoc = null;
+        this.pdfJsDoc = null;
         this.currentPage = 0;
         this.signaturePosition = { x: 100, y: 100 };
         this.signatureSize = 150;
