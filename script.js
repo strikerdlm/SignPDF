@@ -11,6 +11,7 @@ class PDFSignOMatic {
         this.signatureSize = 150;
         this.signatureOpacity = 1;
         this.canvasScale = 1;
+        this.outputScale = 1;
         
         // Configure PDF.js worker
         if (typeof pdfjsLib !== 'undefined') {
@@ -180,26 +181,39 @@ class PDFSignOMatic {
             const page = await this.pdfJsDoc.getPage(this.currentPage + 1); // PDF.js uses 1-based indexing
             const viewport = page.getViewport({ scale: 1 });
             
-            // Calculate scale to fit within container
-            const maxWidth = 800;
-            const maxHeight = 600;
+            // Calculate scale to fit within container with high DPI support
+            const maxWidth = 900;
+            const maxHeight = 700;
             let scale = Math.min(maxWidth / viewport.width, maxHeight / viewport.height, 1);
             
-            // Apply scale to viewport
-            const scaledViewport = page.getViewport({ scale });
+            // Increase scale for better quality (but not too high to avoid performance issues)
+            const devicePixelRatio = window.devicePixelRatio || 1;
+            const outputScale = Math.min(devicePixelRatio * 2, 3); // Cap at 3x for performance
             
-            // Set canvas size
+            const scaledViewport = page.getViewport({ scale: scale * outputScale });
+            
+            // Set canvas size with high DPI
             canvas.width = scaledViewport.width;
             canvas.height = scaledViewport.height;
+            
+            // Scale down the display size while keeping high resolution
+            canvas.style.width = `${scaledViewport.width / outputScale}px`;
+            canvas.style.height = `${scaledViewport.height / outputScale}px`;
+            
+            // Store the actual scale for coordinate conversion
             this.canvasScale = scale;
+            this.outputScale = outputScale;
             
             // Clear canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
+            // Scale the context to match the output scale
+            ctx.scale(outputScale, outputScale);
+            
             // Render PDF page
             const renderContext = {
                 canvasContext: ctx,
-                viewport: scaledViewport
+                viewport: page.getViewport({ scale })
             };
             
             await page.render(renderContext).promise;
@@ -215,20 +229,33 @@ class PDFSignOMatic {
     }
     
     renderPlaceholder(canvas, ctx) {
-        // Fallback placeholder rendering
-        canvas.width = 600;
-        canvas.height = 800;
+        // Fallback placeholder rendering with high DPI
+        const devicePixelRatio = window.devicePixelRatio || 1;
+        const outputScale = Math.min(devicePixelRatio * 2, 3);
+        
+        const displayWidth = 600;
+        const displayHeight = 800;
+        
+        canvas.width = displayWidth * outputScale;
+        canvas.height = displayHeight * outputScale;
+        canvas.style.width = `${displayWidth}px`;
+        canvas.style.height = `${displayHeight}px`;
+        
+        ctx.scale(outputScale, outputScale);
+        
+        this.canvasScale = 1;
+        this.outputScale = outputScale;
         
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, displayWidth, displayHeight);
         ctx.strokeStyle = '#cccccc';
-        ctx.strokeRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeRect(0, 0, displayWidth, displayHeight);
         
         ctx.fillStyle = '#666666';
         ctx.font = '16px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText(`PDF Page ${this.currentPage + 1}`, canvas.width / 2, canvas.height / 2);
-        ctx.fillText('(Preview unavailable - actual PDF content will be preserved)', canvas.width / 2, canvas.height / 2 + 30);
+        ctx.fillText(`PDF Page ${this.currentPage + 1}`, displayWidth / 2, displayHeight / 2);
+        ctx.fillText('(Preview unavailable - actual PDF content will be preserved)', displayWidth / 2, displayHeight / 2 + 30);
         
         this.updateSignaturePreview();
     }
@@ -257,16 +284,28 @@ class PDFSignOMatic {
     updateSignaturePreview() {
         const signaturePreview = document.getElementById('signaturePreview');
         const canvas = document.getElementById('pdfCanvas');
+        const container = document.querySelector('.pdf-container');
         
         if (!signaturePreview.classList.contains('visible')) return;
         
+        // Get positions relative to the container
         const canvasRect = canvas.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
         
-        signaturePreview.style.left = `${this.signaturePosition.x}px`;
-        signaturePreview.style.top = `${this.signaturePosition.y}px`;
+        // Calculate offset of canvas within container
+        const canvasOffsetX = canvasRect.left - containerRect.left;
+        const canvasOffsetY = canvasRect.top - containerRect.top;
+        
+        // Position signature preview relative to container
+        signaturePreview.style.left = `${canvasOffsetX + this.signaturePosition.x}px`;
+        signaturePreview.style.top = `${canvasOffsetY + this.signaturePosition.y}px`;
         signaturePreview.style.width = `${this.signatureSize}px`;
         signaturePreview.style.height = `${this.signatureSize * 0.5}px`; // Maintain aspect ratio
         signaturePreview.style.opacity = this.signatureOpacity;
+        
+        // Ensure the signature preview is visible
+        signaturePreview.style.pointerEvents = 'none';
+        signaturePreview.style.zIndex = '10';
     }
 
     handlePageChange(e) {
@@ -288,35 +327,54 @@ class PDFSignOMatic {
 
     handleMouseMove(e) {
         const canvas = document.getElementById('pdfCanvas');
-        const rect = canvas.getBoundingClientRect();
+        const container = document.querySelector('.pdf-container');
         
         if (e.target === canvas || e.target.closest('.pdf-container')) {
+            // Get precise canvas positioning
+            const rect = canvas.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            
+            // Calculate mouse position relative to canvas
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
             
-            // Update signature position on hover
+            // Check if mouse is within canvas bounds
             if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
+                // Center the signature on the mouse position
                 this.signaturePosition.x = x - this.signatureSize / 2;
                 this.signaturePosition.y = y - (this.signatureSize * 0.5) / 2;
                 this.updateSignaturePreview();
+                
+                // Change cursor to indicate signature can be placed
+                canvas.style.cursor = 'crosshair';
+            } else {
+                canvas.style.cursor = 'default';
             }
         }
     }
 
     handleCanvasClick(e) {
         const canvas = document.getElementById('pdfCanvas');
-        const rect = canvas.getBoundingClientRect();
         
         if (e.target === canvas || e.target.closest('.signature-preview')) {
+            // Get precise click position
+            const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
             
+            // Ensure click is within canvas bounds
             if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
+                // Set signature position with precise centering
                 this.signaturePosition.x = x - this.signatureSize / 2;
                 this.signaturePosition.y = y - (this.signatureSize * 0.5) / 2;
+                
+                // Ensure signature doesn't go outside canvas bounds
+                this.signaturePosition.x = Math.max(0, Math.min(this.signaturePosition.x, rect.width - this.signatureSize));
+                this.signaturePosition.y = Math.max(0, Math.min(this.signaturePosition.y, rect.height - (this.signatureSize * 0.5)));
+                
                 this.updateSignaturePreview();
                 
-                // Add a little animation to show the signature was placed
+                // Add confirmation animation
                 const signaturePreview = document.getElementById('signaturePreview');
                 signaturePreview.classList.add('success-animation');
                 setTimeout(() => signaturePreview.classList.remove('success-animation'), 600);
@@ -354,12 +412,20 @@ class PDFSignOMatic {
             // Calculate signature position and size in PDF coordinates
             const canvas = document.getElementById('pdfCanvas');
             
-            // Convert from canvas coordinates to PDF coordinates
-            // Note: PDF coordinates have origin at bottom-left, canvas has origin at top-left
-            const pdfX = this.signaturePosition.x / this.canvasScale;
-            const pdfY = height - (this.signaturePosition.y + this.signatureSize * 0.5) / this.canvasScale;
-            const pdfWidth = this.signatureSize / this.canvasScale;
-            const pdfHeight = (this.signatureSize * 0.5) / this.canvasScale;
+            // Get the display dimensions of the canvas
+            const canvasDisplayWidth = parseFloat(canvas.style.width) || canvas.width;
+            const canvasDisplayHeight = parseFloat(canvas.style.height) || canvas.height;
+            
+            // Convert from canvas display coordinates to PDF coordinates
+            // Account for the scale factor between display and PDF
+            const scaleX = width / canvasDisplayWidth;
+            const scaleY = height / canvasDisplayHeight;
+            
+            // Convert coordinates - PDF has origin at bottom-left, canvas at top-left
+            const pdfX = this.signaturePosition.x * scaleX;
+            const pdfY = height - (this.signaturePosition.y + this.signatureSize * 0.5) * scaleY;
+            const pdfWidth = this.signatureSize * scaleX;
+            const pdfHeight = (this.signatureSize * 0.5) * scaleY;
 
             // Add signature to PDF
             page.drawImage(signatureImage, {
@@ -409,6 +475,8 @@ class PDFSignOMatic {
         this.signaturePosition = { x: 100, y: 100 };
         this.signatureSize = 150;
         this.signatureOpacity = 1;
+        this.canvasScale = 1;
+        this.outputScale = 1;
 
         // Reset upload areas
         document.getElementById('pdfUpload').classList.remove('uploaded');
