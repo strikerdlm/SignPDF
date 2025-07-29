@@ -3,15 +3,15 @@
 class PDFSignOMatic {
     constructor() {
         this.pdfFile = null;
-        this.signatureFile = null;
+        this.signatureFiles = []; // Array to store multiple signature files
         this.pdfDoc = null;
         this.pdfJsDoc = null;
         this.currentPage = 0;
-        this.signaturePosition = { x: 100, y: 100 };
-        this.signatureSize = 150;
-        this.signatureOpacity = 1;
+        this.placedSignatures = {}; // Object to store placed signatures by page
+        this.previewSignature = { file: null, position: { x: 100, y: 100 }, size: 150, opacity: 1 };
         this.canvasScale = 1;
         this.outputScale = 1;
+        this.activeSignatureIndex = 0; // Track which signature is being placed
         
         // Configure PDF.js worker
         if (typeof pdfjsLib !== 'undefined') {
@@ -38,7 +38,7 @@ class PDFSignOMatic {
         signatureUpload.addEventListener('click', () => signatureInput.click());
         signatureUpload.addEventListener('dragover', this.handleDragOver.bind(this));
         signatureUpload.addEventListener('drop', (e) => this.handleDrop(e, 'signature'));
-        signatureInput.addEventListener('change', (e) => this.handleSignatureUpload(e.target.files[0]));
+        signatureInput.addEventListener('change', (e) => this.handleMultipleSignatureUpload(e.target.files));
 
         // Controls
         document.getElementById('pageSelect').addEventListener('change', this.handlePageChange.bind(this));
@@ -48,6 +48,7 @@ class PDFSignOMatic {
         // Action Buttons
         document.getElementById('downloadBtn').addEventListener('click', this.downloadSignedPDF.bind(this));
         document.getElementById('resetBtn').addEventListener('click', this.reset.bind(this));
+        document.getElementById('clearAllBtn').addEventListener('click', this.clearAllSignatures.bind(this));
 
         // Signature positioning
         document.addEventListener('mousemove', this.handleMouseMove.bind(this));
@@ -65,13 +66,20 @@ class PDFSignOMatic {
         
         const files = e.dataTransfer.files;
         if (files.length > 0) {
-            const file = files[0];
-            if (type === 'pdf' && file.type === 'application/pdf') {
-                this.handlePDFUpload(file);
-            } else if (type === 'signature' && file.type.startsWith('image/')) {
-                this.handleSignatureUpload(file);
-            } else {
-                this.showError(`Please upload a valid ${type === 'pdf' ? 'PDF' : 'image'} file.`);
+            if (type === 'pdf') {
+                const file = files[0];
+                if (file.type === 'application/pdf') {
+                    this.handlePDFUpload(file);
+                } else {
+                    this.showError('Please upload a valid PDF file.');
+                }
+            } else if (type === 'signature') {
+                const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+                if (imageFiles.length > 0) {
+                    this.handleMultipleSignatureUpload(imageFiles);
+                } else {
+                    this.showError('Please upload valid image files.');
+                }
             }
         }
     }
@@ -127,21 +135,115 @@ class PDFSignOMatic {
         }
     }
 
-    async handleSignatureUpload(file) {
-        if (!file) return;
+    async handleMultipleSignatureUpload(files) {
+        if (!files || files.length === 0) return;
         
         try {
             this.showLoading('signatureUpload');
             
-            this.signatureFile = file;
-            this.markUploaded('signatureUpload', '✍️ Signature Loaded!');
+            const fileArray = Array.isArray(files) ? files : Array.from(files);
+            
+            for (const file of fileArray) {
+                if (file.type.startsWith('image/')) {
+                    const signatureId = `sig_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    this.signatureFiles.push({
+                        id: signatureId,
+                        file: file,
+                        name: file.name
+                    });
+                }
+            }
+            
+            this.updateSignatureLibrary();
+            this.markUploaded('signatureUpload', `✍️ Added ${fileArray.length} signature(s)!`);
             this.checkIfReadyToPreview();
             
         } catch (error) {
-            console.error('Error loading signature:', error);
-            this.showError('Failed to load signature image.');
+            console.error('Error loading signatures:', error);
+            this.showError('Failed to load signature images.');
             this.resetUploadArea('signatureUpload');
         }
+    }
+    
+    updateSignatureLibrary() {
+        const signaturesList = document.getElementById('signaturesList');
+        const signaturesGrid = document.getElementById('signaturesGrid');
+        
+        if (this.signatureFiles.length === 0) {
+            signaturesList.style.display = 'none';
+            return;
+        }
+        
+        signaturesList.style.display = 'block';
+        signaturesGrid.innerHTML = '';
+        
+        this.signatureFiles.forEach((signature, index) => {
+            const signatureItem = document.createElement('div');
+            signatureItem.className = 'signature-item';
+            signatureItem.dataset.signatureId = signature.id;
+            
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(signature.file);
+            img.alt = signature.name;
+            
+            const name = document.createElement('div');
+            name.className = 'signature-name';
+            name.textContent = signature.name.length > 15 ? signature.name.substring(0, 15) + '...' : signature.name;
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-btn';
+            removeBtn.innerHTML = '×';
+            removeBtn.onclick = (e) => {
+                e.stopPropagation();
+                this.removeSignatureFromLibrary(signature.id);
+            };
+            
+            signatureItem.appendChild(img);
+            signatureItem.appendChild(name);
+            signatureItem.appendChild(removeBtn);
+            
+            signatureItem.addEventListener('click', () => {
+                this.selectSignatureForPlacement(signature, index);
+            });
+            
+            signaturesGrid.appendChild(signatureItem);
+        });
+    }
+    
+    selectSignatureForPlacement(signature, index) {
+        // Remove active class from all signature items
+        document.querySelectorAll('.signature-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        
+        // Add active class to selected item
+        const selectedItem = document.querySelector(`[data-signature-id="${signature.id}"]`);
+        if (selectedItem) {
+            selectedItem.classList.add('active');
+        }
+        
+        // Set preview signature
+        this.previewSignature.file = signature.file;
+        this.activeSignatureIndex = index;
+        
+        // Show preview
+        this.showSignaturePreview();
+    }
+    
+    removeSignatureFromLibrary(signatureId) {
+        this.signatureFiles = this.signatureFiles.filter(sig => sig.id !== signatureId);
+        this.updateSignatureLibrary();
+        
+        // Clear preview if this signature was selected
+        if (this.previewSignature.file) {
+            const activeSignature = this.signatureFiles.find(sig => sig.file === this.previewSignature.file);
+            if (!activeSignature) {
+                this.previewSignature.file = null;
+                this.hideSignaturePreview();
+            }
+        }
+        
+        this.checkIfReadyToPreview();
     }
 
     showLoading(elementId) {
@@ -221,6 +323,9 @@ class PDFSignOMatic {
             // Update signature preview after rendering
             this.updateSignaturePreview();
             
+            // Render placed signatures
+            this.renderPlacedSignatures();
+            
         } catch (error) {
             console.error('Error rendering PDF:', error);
             // Fallback to placeholder if rendering fails
@@ -258,27 +363,36 @@ class PDFSignOMatic {
         ctx.fillText('(Preview unavailable - actual PDF content will be preserved)', displayWidth / 2, displayHeight / 2 + 30);
         
         this.updateSignaturePreview();
+        this.renderPlacedSignatures();
     }
 
     checkIfReadyToPreview() {
-        if (this.pdfFile && this.signatureFile) {
+        if (this.pdfFile && this.signatureFiles.length > 0) {
             document.getElementById('previewSection').style.display = 'block';
-            this.showSignaturePreview();
+            this.renderPlacedSignatures();
         }
     }
 
     async showSignaturePreview() {
+        if (!this.previewSignature.file) return;
+        
         const signaturePreview = document.getElementById('signaturePreview');
         
         // Create image element for signature
         const img = document.createElement('img');
-        img.src = URL.createObjectURL(this.signatureFile);
+        img.src = URL.createObjectURL(this.previewSignature.file);
         
         signaturePreview.innerHTML = '';
         signaturePreview.appendChild(img);
         signaturePreview.classList.add('visible');
         
         this.updateSignaturePreview();
+    }
+    
+    hideSignaturePreview() {
+        const signaturePreview = document.getElementById('signaturePreview');
+        signaturePreview.classList.remove('visible');
+        signaturePreview.innerHTML = '';
     }
 
     updateSignaturePreview() {
@@ -297,11 +411,11 @@ class PDFSignOMatic {
         const canvasOffsetY = canvasRect.top - containerRect.top;
         
         // Position signature preview relative to container
-        signaturePreview.style.left = `${canvasOffsetX + this.signaturePosition.x}px`;
-        signaturePreview.style.top = `${canvasOffsetY + this.signaturePosition.y}px`;
-        signaturePreview.style.width = `${this.signatureSize}px`;
-        signaturePreview.style.height = `${this.signatureSize * 0.5}px`; // Maintain aspect ratio
-        signaturePreview.style.opacity = this.signatureOpacity;
+        signaturePreview.style.left = `${canvasOffsetX + this.previewSignature.position.x}px`;
+        signaturePreview.style.top = `${canvasOffsetY + this.previewSignature.position.y}px`;
+        signaturePreview.style.width = `${this.previewSignature.size}px`;
+        signaturePreview.style.height = `${this.previewSignature.size * 0.5}px`; // Maintain aspect ratio
+        signaturePreview.style.opacity = this.previewSignature.opacity;
         
         // Ensure the signature preview is visible
         signaturePreview.style.pointerEvents = 'none';
@@ -311,17 +425,19 @@ class PDFSignOMatic {
     handlePageChange(e) {
         this.currentPage = parseInt(e.target.value);
         this.renderPDF();
+        this.renderPlacedSignatures(); // Re-render signatures for new page
+        this.updatePlacedSignaturesInfo();
     }
 
     handleSizeChange(e) {
-        this.signatureSize = parseInt(e.target.value);
-        document.getElementById('sizeValue').textContent = `${this.signatureSize}px`;
+        this.previewSignature.size = parseInt(e.target.value);
+        document.getElementById('sizeValue').textContent = `${this.previewSignature.size}px`;
         this.updateSignaturePreview();
     }
 
     handleOpacityChange(e) {
-        this.signatureOpacity = parseFloat(e.target.value);
-        document.getElementById('opacityValue').textContent = `${Math.round(this.signatureOpacity * 100)}%`;
+        this.previewSignature.opacity = parseFloat(e.target.value);
+        document.getElementById('opacityValue').textContent = `${Math.round(this.previewSignature.opacity * 100)}%`;
         this.updateSignaturePreview();
     }
 
@@ -330,6 +446,12 @@ class PDFSignOMatic {
         const container = document.querySelector('.pdf-container');
         
         if (e.target === canvas || e.target.closest('.pdf-container')) {
+            // Only show preview if a signature is selected
+            if (!this.previewSignature.file) {
+                canvas.style.cursor = 'default';
+                return;
+            }
+            
             // Get precise canvas positioning
             const rect = canvas.getBoundingClientRect();
             const containerRect = container.getBoundingClientRect();
@@ -341,8 +463,8 @@ class PDFSignOMatic {
             // Check if mouse is within canvas bounds
             if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
                 // Center the signature on the mouse position
-                this.signaturePosition.x = x - this.signatureSize / 2;
-                this.signaturePosition.y = y - (this.signatureSize * 0.5) / 2;
+                this.previewSignature.position.x = x - this.previewSignature.size / 2;
+                this.previewSignature.position.y = y - (this.previewSignature.size * 0.5) / 2;
                 this.updateSignaturePreview();
                 
                 // Change cursor to indicate signature can be placed
@@ -356,7 +478,12 @@ class PDFSignOMatic {
     handleCanvasClick(e) {
         const canvas = document.getElementById('pdfCanvas');
         
-        if (e.target === canvas || e.target.closest('.signature-preview')) {
+        // Check if clicking on an existing placed signature first
+        if (e.target.closest('.placed-signature')) {
+            return; // Let the placed signature handle its own clicks
+        }
+        
+        if (e.target === canvas && this.previewSignature.file) {
             // Get precise click position
             const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
@@ -364,27 +491,175 @@ class PDFSignOMatic {
             
             // Ensure click is within canvas bounds
             if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
-                // Set signature position with precise centering
-                this.signaturePosition.x = x - this.signatureSize / 2;
-                this.signaturePosition.y = y - (this.signatureSize * 0.5) / 2;
+                // Calculate centered position
+                const centeredX = x - this.previewSignature.size / 2;
+                const centeredY = y - (this.previewSignature.size * 0.5) / 2;
                 
                 // Ensure signature doesn't go outside canvas bounds
-                this.signaturePosition.x = Math.max(0, Math.min(this.signaturePosition.x, rect.width - this.signatureSize));
-                this.signaturePosition.y = Math.max(0, Math.min(this.signaturePosition.y, rect.height - (this.signatureSize * 0.5)));
+                const boundedX = Math.max(0, Math.min(centeredX, rect.width - this.previewSignature.size));
+                const boundedY = Math.max(0, Math.min(centeredY, rect.height - (this.previewSignature.size * 0.5)));
                 
-                this.updateSignaturePreview();
-                
-                // Add confirmation animation
-                const signaturePreview = document.getElementById('signaturePreview');
-                signaturePreview.classList.add('success-animation');
-                setTimeout(() => signaturePreview.classList.remove('success-animation'), 600);
+                // Place the signature permanently
+                this.placeSignature(boundedX, boundedY);
             }
         }
     }
+    
+    placeSignature(x, y) {
+        if (!this.previewSignature.file) return;
+        
+        // Initialize page signatures if not exists
+        if (!this.placedSignatures[this.currentPage]) {
+            this.placedSignatures[this.currentPage] = [];
+        }
+        
+        // Create signature data
+        const signatureData = {
+            id: `placed_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            file: this.previewSignature.file,
+            position: { x, y },
+            size: this.previewSignature.size,
+            opacity: this.previewSignature.opacity,
+            page: this.currentPage
+        };
+        
+        // Add to placed signatures
+        this.placedSignatures[this.currentPage].push(signatureData);
+        
+        // Re-render placed signatures
+        this.renderPlacedSignatures();
+        
+        // Update placed signatures info
+        this.updatePlacedSignaturesInfo();
+        
+        // Hide preview after placing
+        this.hideSignaturePreview();
+        
+        // Clear active selection in library
+        document.querySelectorAll('.signature-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        
+        this.previewSignature.file = null;
+    }
+    
+    renderPlacedSignatures() {
+        const placedContainer = document.getElementById('placedSignatures');
+        placedContainer.innerHTML = '';
+        
+        // Render signatures for current page
+        const pageSignatures = this.placedSignatures[this.currentPage] || [];
+        
+        pageSignatures.forEach(signature => {
+            const signatureElement = this.createPlacedSignatureElement(signature);
+            placedContainer.appendChild(signatureElement);
+        });
+    }
+    
+    createPlacedSignatureElement(signatureData) {
+        const signatureEl = document.createElement('div');
+        signatureEl.className = 'placed-signature';
+        signatureEl.dataset.signatureId = signatureData.id;
+        
+        // Position and style
+        signatureEl.style.left = `${signatureData.position.x}px`;
+        signatureEl.style.top = `${signatureData.position.y}px`;
+        signatureEl.style.width = `${signatureData.size}px`;
+        signatureEl.style.height = `${signatureData.size * 0.5}px`;
+        signatureEl.style.opacity = signatureData.opacity;
+        
+        // Image
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(signatureData.file);
+        img.alt = 'Placed signature';
+        
+        // Remove button
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'remove-signature';
+        removeBtn.innerHTML = '×';
+        removeBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.removePlacedSignature(signatureData.id);
+        };
+        
+        signatureEl.appendChild(img);
+        signatureEl.appendChild(removeBtn);
+        
+        return signatureEl;
+    }
+    
+    removePlacedSignature(signatureId) {
+        // Find and remove signature from all pages
+        Object.keys(this.placedSignatures).forEach(page => {
+            this.placedSignatures[page] = this.placedSignatures[page].filter(
+                sig => sig.id !== signatureId
+            );
+        });
+        
+        // Re-render signatures
+        this.renderPlacedSignatures();
+        this.updatePlacedSignaturesInfo();
+    }
+    
+    updatePlacedSignaturesInfo() {
+        const placedInfo = document.getElementById('placedSignaturesInfo');
+        const placedList = document.getElementById('placedSignaturesList');
+        
+        // Count total placed signatures
+        let totalSignatures = 0;
+        Object.keys(this.placedSignatures).forEach(page => {
+            totalSignatures += this.placedSignatures[page].length;
+        });
+        
+        if (totalSignatures === 0) {
+            placedInfo.style.display = 'none';
+            return;
+        }
+        
+        placedInfo.style.display = 'block';
+        placedList.innerHTML = '';
+        
+        // Show signatures by page
+        Object.keys(this.placedSignatures).forEach(page => {
+            const pageSignatures = this.placedSignatures[page];
+            if (pageSignatures.length > 0) {
+                const pageInfo = document.createElement('div');
+                pageInfo.className = 'placed-signature-item';
+                pageInfo.textContent = `Page ${parseInt(page) + 1}: ${pageSignatures.length} signature(s)`;
+                placedList.appendChild(pageInfo);
+            }
+        });
+    }
+    
+    clearAllSignatures() {
+        this.placedSignatures = {};
+        this.renderPlacedSignatures();
+        this.updatePlacedSignaturesInfo();
+        this.hideSignaturePreview();
+        this.previewSignature.file = null;
+        
+        // Clear active selection
+        document.querySelectorAll('.signature-item').forEach(item => {
+            item.classList.remove('active');
+        });
+    }
 
     async downloadSignedPDF() {
-        if (!this.pdfDoc || !this.signatureFile) {
-            this.showError('Please upload both PDF and signature files.');
+        if (!this.pdfDoc) {
+            this.showError('Please upload a PDF file.');
+            return;
+        }
+        
+        // Check if any signatures are placed
+        let hasSignatures = false;
+        Object.keys(this.placedSignatures).forEach(page => {
+            if (this.placedSignatures[page].length > 0) {
+                hasSignatures = true;
+            }
+        });
+        
+        if (!hasSignatures) {
+            this.showError('Please place at least one signature on the PDF.');
             return;
         }
 
@@ -394,47 +669,54 @@ class PDFSignOMatic {
             downloadBtn.innerHTML = '<div class="loading"></div> Processing...';
             downloadBtn.disabled = true;
 
-            // Load signature image
-            const signatureImageBytes = await this.signatureFile.arrayBuffer();
-            let signatureImage;
-            
-            if (this.signatureFile.type === 'image/png') {
-                signatureImage = await this.pdfDoc.embedPng(signatureImageBytes);
-            } else {
-                signatureImage = await this.pdfDoc.embedJpg(signatureImageBytes);
-            }
-
-            // Get the page
+            // Get pages from PDF
             const pages = this.pdfDoc.getPages();
-            const page = pages[this.currentPage];
-            const { width, height } = page.getSize();
-
-            // Calculate signature position and size in PDF coordinates
-            const canvas = document.getElementById('pdfCanvas');
             
-            // Get the display dimensions of the canvas
-            const canvasDisplayWidth = parseFloat(canvas.style.width) || canvas.width;
-            const canvasDisplayHeight = parseFloat(canvas.style.height) || canvas.height;
-            
-            // Convert from canvas display coordinates to PDF coordinates
-            // Account for the scale factor between display and PDF
-            const scaleX = width / canvasDisplayWidth;
-            const scaleY = height / canvasDisplayHeight;
-            
-            // Convert coordinates - PDF has origin at bottom-left, canvas at top-left
-            const pdfX = this.signaturePosition.x * scaleX;
-            const pdfY = height - (this.signaturePosition.y + this.signatureSize * 0.5) * scaleY;
-            const pdfWidth = this.signatureSize * scaleX;
-            const pdfHeight = (this.signatureSize * 0.5) * scaleY;
-
-            // Add signature to PDF
-            page.drawImage(signatureImage, {
-                x: pdfX,
-                y: pdfY,
-                width: pdfWidth,
-                height: pdfHeight,
-                opacity: this.signatureOpacity,
-            });
+            // Process each page with placed signatures
+            for (const pageIndex of Object.keys(this.placedSignatures)) {
+                const pageSignatures = this.placedSignatures[pageIndex];
+                if (pageSignatures.length === 0) continue;
+                
+                const page = pages[parseInt(pageIndex)];
+                const { width, height } = page.getSize();
+                
+                // Get canvas dimensions for coordinate conversion
+                const canvas = document.getElementById('pdfCanvas');
+                const canvasDisplayWidth = parseFloat(canvas.style.width) || canvas.width;
+                const canvasDisplayHeight = parseFloat(canvas.style.height) || canvas.height;
+                
+                // Calculate scale factors
+                const scaleX = width / canvasDisplayWidth;
+                const scaleY = height / canvasDisplayHeight;
+                
+                // Add each signature on this page
+                for (const signature of pageSignatures) {
+                    // Load and embed signature image
+                    const signatureImageBytes = await signature.file.arrayBuffer();
+                    let signatureImage;
+                    
+                    if (signature.file.type === 'image/png') {
+                        signatureImage = await this.pdfDoc.embedPng(signatureImageBytes);
+                    } else {
+                        signatureImage = await this.pdfDoc.embedJpg(signatureImageBytes);
+                    }
+                    
+                    // Convert coordinates - PDF has origin at bottom-left, canvas at top-left
+                    const pdfX = signature.position.x * scaleX;
+                    const pdfY = height - (signature.position.y + signature.size * 0.5) * scaleY;
+                    const pdfWidth = signature.size * scaleX;
+                    const pdfHeight = (signature.size * 0.5) * scaleY;
+                    
+                    // Draw signature on PDF
+                    page.drawImage(signatureImage, {
+                        x: pdfX,
+                        y: pdfY,
+                        width: pdfWidth,
+                        height: pdfHeight,
+                        opacity: signature.opacity,
+                    });
+                }
+            }
 
             // Generate PDF
             const pdfBytes = await this.pdfDoc.save();
@@ -468,15 +750,15 @@ class PDFSignOMatic {
 
     reset() {
         this.pdfFile = null;
-        this.signatureFile = null;
+        this.signatureFiles = [];
         this.pdfDoc = null;
         this.pdfJsDoc = null;
         this.currentPage = 0;
-        this.signaturePosition = { x: 100, y: 100 };
-        this.signatureSize = 150;
-        this.signatureOpacity = 1;
+        this.placedSignatures = {};
+        this.previewSignature = { file: null, position: { x: 100, y: 100 }, size: 150, opacity: 1 };
         this.canvasScale = 1;
         this.outputScale = 1;
+        this.activeSignatureIndex = 0;
 
         // Reset upload areas
         document.getElementById('pdfUpload').classList.remove('uploaded');
@@ -492,8 +774,8 @@ class PDFSignOMatic {
         const signatureContent = document.querySelector('#signatureUpload .upload-content');
         signatureContent.innerHTML = `
             <div class="upload-icon">✍️</div>
-            <h3>Upload Signature Image</h3>
-            <p>Drop your PNG signature here or click to browse</p>
+            <h4>Add New Signature/Image</h4>
+            <p>Drop PNG/JPG files here or click to browse</p>
         `;
 
         // Reset inputs
@@ -504,10 +786,19 @@ class PDFSignOMatic {
         document.getElementById('sizeValue').textContent = '150px';
         document.getElementById('opacityValue').textContent = '100%';
 
+        // Clear signature library and placed signatures
+        document.getElementById('signaturesList').style.display = 'none';
+        document.getElementById('signaturesGrid').innerHTML = '';
+        document.getElementById('placedSignaturesInfo').style.display = 'none';
+        document.getElementById('placedSignatures').innerHTML = '';
+        
         // Hide preview section
         document.getElementById('previewSection').style.display = 'none';
+        
+        // Hide signature preview
+        this.hideSignaturePreview();
 
-        this.showSuccess('Reset complete! Ready for a new signature. ✨');
+        this.showSuccess('Reset complete! Ready for new signatures and PDFs. ✨');
     }
 
     showError(message) {

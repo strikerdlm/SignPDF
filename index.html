@@ -38,19 +38,27 @@
                 </div>
             </div>
 
-            <div class="upload-area" id="signatureUpload">
-                <div class="upload-content">
-                    <div class="upload-icon">✍️</div>
-                    <h3>Upload Signature Image</h3>
-                    <p>Drop your PNG signature here or click to browse</p>
-                    <input type="file" id="signatureInput" accept=".png,.jpg,.jpeg" hidden>
+            <div class="signature-management">
+                <h3>📝 Signature & Image Library</h3>
+                <div class="signature-upload-area" id="signatureUpload">
+                    <div class="upload-content">
+                        <div class="upload-icon">✍️</div>
+                        <h4>Add New Signature/Image</h4>
+                        <p>Drop PNG/JPG files here or click to browse</p>
+                        <input type="file" id="signatureInput" accept=".png,.jpg,.jpeg" multiple hidden>
+                    </div>
+                </div>
+                
+                <div class="signatures-list" id="signaturesList" style="display: none;">
+                    <h4>Available Signatures:</h4>
+                    <div class="signatures-grid" id="signaturesGrid"></div>
                 </div>
             </div>
         </div>
 
         <div class="preview-section" id="previewSection" style="display: none;">
             <div class="controls">
-                <h3>Position Your Signature</h3>
+                <h3>📍 Position & Place Signatures</h3>
                 <div class="control-group">
                     <label for="pageSelect">Page:</label>
                     <select id="pageSelect"></select>
@@ -65,11 +73,21 @@
                     <input type="range" id="signatureOpacity" min="0.1" max="1" step="0.1" value="1">
                     <span id="opacityValue">100%</span>
                 </div>
+                <div class="placement-info">
+                    <p>🎯 <strong>Instructions:</strong> Click on any signature from your library, then click on the PDF to place it. You can place multiple signatures!</p>
+                </div>
             </div>
 
             <div class="pdf-container">
                 <canvas id="pdfCanvas"></canvas>
                 <div id="signaturePreview" class="signature-preview"></div>
+                <div id="placedSignatures" class="placed-signatures-container"></div>
+            </div>
+
+            <div class="placed-signatures-info" id="placedSignaturesInfo" style="display: none;">
+                <h4>📋 Placed Signatures</h4>
+                <div class="placed-signatures-list" id="placedSignaturesList"></div>
+                <button id="clearAllBtn" class="clear-all-btn">🗑️ Clear All Signatures</button>
             </div>
 
             <div class="action-buttons">
