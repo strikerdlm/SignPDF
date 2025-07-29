@@ -397,29 +397,26 @@ class PDFSignOMatic {
 
     updateSignaturePreview() {
         const signaturePreview = document.getElementById('signaturePreview');
-        const canvas = document.getElementById('pdfCanvas');
-        const container = document.querySelector('.pdf-container');
         
         if (!signaturePreview.classList.contains('visible')) return;
         
-        // Get positions relative to the container
-        const canvasRect = canvas.getBoundingClientRect();
-        const containerRect = container.getBoundingClientRect();
+        // Use utility method for precise offset calculation
+        const offset = this.getCanvasToContainerOffset();
         
-        // Calculate offset of canvas within container
-        const canvasOffsetX = canvasRect.left - containerRect.left;
-        const canvasOffsetY = canvasRect.top - containerRect.top;
+        // Position signature preview exactly where it will be placed
+        const previewX = offset.x + this.previewSignature.position.x;
+        const previewY = offset.y + this.previewSignature.position.y;
         
-        // Position signature preview relative to container
-        signaturePreview.style.left = `${canvasOffsetX + this.previewSignature.position.x}px`;
-        signaturePreview.style.top = `${canvasOffsetY + this.previewSignature.position.y}px`;
+        signaturePreview.style.left = `${previewX}px`;
+        signaturePreview.style.top = `${previewY}px`;
         signaturePreview.style.width = `${this.previewSignature.size}px`;
-        signaturePreview.style.height = `${this.previewSignature.size * 0.5}px`; // Maintain aspect ratio
+        signaturePreview.style.height = `${this.previewSignature.size * 0.5}px`;
         signaturePreview.style.opacity = this.previewSignature.opacity;
         
-        // Ensure the signature preview is visible
+        // Ensure proper layering and interaction
         signaturePreview.style.pointerEvents = 'none';
-        signaturePreview.style.zIndex = '10';
+        signaturePreview.style.zIndex = '15';
+        signaturePreview.style.position = 'absolute';
     }
 
     handlePageChange(e) {
@@ -452,19 +449,28 @@ class PDFSignOMatic {
                 return;
             }
             
-            // Get precise canvas positioning
+            // Get accurate canvas position accounting for borders, padding, and scaling
             const rect = canvas.getBoundingClientRect();
-            const containerRect = container.getBoundingClientRect();
             
-            // Calculate mouse position relative to canvas
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            // Calculate mouse position relative to the actual canvas display area
+            const canvasX = e.clientX - rect.left;
+            const canvasY = e.clientY - rect.top;
             
             // Check if mouse is within canvas bounds
-            if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
-                // Center the signature on the mouse position
-                this.previewSignature.position.x = x - this.previewSignature.size / 2;
-                this.previewSignature.position.y = y - (this.previewSignature.size * 0.5) / 2;
+            if (canvasX >= 0 && canvasX <= rect.width && canvasY >= 0 && canvasY <= rect.height) {
+                // Calculate centered position
+                const rawPosition = {
+                    x: canvasX - this.previewSignature.size / 2,
+                    y: canvasY - (this.previewSignature.size * 0.5) / 2
+                };
+                
+                // Validate and clamp position to canvas bounds
+                const validatedPosition = this.validateSignaturePosition(rawPosition, this.previewSignature.size, rect);
+                
+                // Store the validated coordinates for precise placement
+                this.previewSignature.position.x = validatedPosition.x;
+                this.previewSignature.position.y = validatedPosition.y;
+                
                 this.updateSignaturePreview();
                 
                 // Change cursor to indicate signature can be placed
@@ -484,23 +490,20 @@ class PDFSignOMatic {
         }
         
         if (e.target === canvas && this.previewSignature.file) {
-            // Get precise click position
+            // Get exact click position using the same method as mouse move
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
             
             // Ensure click is within canvas bounds
-            if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
-                // Calculate centered position
-                const centeredX = x - this.previewSignature.size / 2;
-                const centeredY = y - (this.previewSignature.size * 0.5) / 2;
+            if (clickX >= 0 && clickX <= rect.width && clickY >= 0 && clickY <= rect.height) {
+                // Use the current preview position for perfect alignment
+                // This ensures what you see is exactly what you get
+                const finalX = this.previewSignature.position.x;
+                const finalY = this.previewSignature.position.y;
                 
-                // Ensure signature doesn't go outside canvas bounds
-                const boundedX = Math.max(0, Math.min(centeredX, rect.width - this.previewSignature.size));
-                const boundedY = Math.max(0, Math.min(centeredY, rect.height - (this.previewSignature.size * 0.5)));
-                
-                // Place the signature permanently
-                this.placeSignature(boundedX, boundedY);
+                // Place the signature permanently at the preview position
+                this.placeSignature(finalX, finalY);
             }
         }
     }
@@ -541,6 +544,35 @@ class PDFSignOMatic {
         });
         
         this.previewSignature.file = null;
+        
+        // Optional: Log placement for debugging
+        if (window.DEBUG_SIGNATURES) {
+            console.log(`Signature placed at canvas coordinates: (${x}, ${y}), size: ${this.previewSignature.size}`);
+        }
+    }
+    
+    // Utility method to ensure accurate coordinate conversion
+    getCanvasToContainerOffset() {
+        const canvas = document.getElementById('pdfCanvas');
+        const container = document.querySelector('.pdf-container');
+        
+        if (!canvas || !container) return { x: 0, y: 0 };
+        
+        const canvasRect = canvas.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        
+        return {
+            x: canvasRect.left - containerRect.left,
+            y: canvasRect.top - containerRect.top
+        };
+    }
+    
+    // Utility method to validate signature position bounds
+    validateSignaturePosition(position, size, canvasRect) {
+        return {
+            x: Math.max(0, Math.min(position.x, canvasRect.width - size)),
+            y: Math.max(0, Math.min(position.y, canvasRect.height - (size * 0.5)))
+        };
     }
     
     renderPlacedSignatures() {
@@ -561,22 +593,29 @@ class PDFSignOMatic {
         signatureEl.className = 'placed-signature';
         signatureEl.dataset.signatureId = signatureData.id;
         
-        // Position and style
+        // Position exactly where it was placed
+        signatureEl.style.position = 'absolute';
         signatureEl.style.left = `${signatureData.position.x}px`;
         signatureEl.style.top = `${signatureData.position.y}px`;
         signatureEl.style.width = `${signatureData.size}px`;
         signatureEl.style.height = `${signatureData.size * 0.5}px`;
         signatureEl.style.opacity = signatureData.opacity;
+        signatureEl.style.zIndex = '5';
         
-        // Image
+        // Image with precise fit
         const img = document.createElement('img');
         img.src = URL.createObjectURL(signatureData.file);
         img.alt = 'Placed signature';
+        img.style.width = '100%';
+        img.style.height = '100%';
+        img.style.objectFit = 'contain';
+        img.style.pointerEvents = 'none'; // Allow click-through to signature element
         
         // Remove button
         const removeBtn = document.createElement('button');
         removeBtn.className = 'remove-signature';
         removeBtn.innerHTML = '×';
+        removeBtn.title = 'Remove signature';
         removeBtn.onclick = (e) => {
             e.stopPropagation();
             this.removePlacedSignature(signatureData.id);
@@ -701,13 +740,22 @@ class PDFSignOMatic {
                         signatureImage = await this.pdfDoc.embedJpg(signatureImageBytes);
                     }
                     
-                    // Convert coordinates - PDF has origin at bottom-left, canvas at top-left
-                    const pdfX = signature.position.x * scaleX;
-                    const pdfY = height - (signature.position.y + signature.size * 0.5) * scaleY;
-                    const pdfWidth = signature.size * scaleX;
-                    const pdfHeight = (signature.size * 0.5) * scaleY;
+                    // Precise coordinate conversion from canvas to PDF coordinates
+                    // Canvas coordinates: (0,0) at top-left, Y increases downward
+                    // PDF coordinates: (0,0) at bottom-left, Y increases upward
                     
-                    // Draw signature on PDF
+                    const canvasX = signature.position.x;
+                    const canvasY = signature.position.y; 
+                    const sigWidth = signature.size;
+                    const sigHeight = signature.size * 0.5;
+                    
+                    // Convert to PDF coordinates with precise scaling
+                    const pdfX = canvasX * scaleX;
+                    const pdfY = height - (canvasY * scaleY) - (sigHeight * scaleY); // Flip Y and account for signature height
+                    const pdfWidth = sigWidth * scaleX;
+                    const pdfHeight = sigHeight * scaleY;
+                    
+                    // Draw signature on PDF with exact positioning
                     page.drawImage(signatureImage, {
                         x: pdfX,
                         y: pdfY,
