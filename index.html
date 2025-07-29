@@ -1,1 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Sign-o-Matic 3000™ ✍️🔥</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>PDF Sign-o-Matic 3000™ ✍️🔥</h1>
+            <p class="subtitle">Because dragging a PNG onto a PDF in 2025 should be as dignified as it sounds.</p>
+        </header>
 
+        <div class="warning-box">
+            <h3>⚠️ Important Disclaimer</h3>
+            <ul>
+                <li>Does NOT create legally binding digital signatures</li>
+                <li>Does NOT implement cryptographic security measures</li>
+                <li>Does NOT verify document authenticity</li>
+            </ul>
+            <p><em>Perfect for when your lawyer uses emojis in contracts! 🤝</em></p>
+        </div>
+
+        <div class="upload-section">
+            <div class="upload-area" id="pdfUpload">
+                <div class="upload-content">
+                    <div class="upload-icon">📄</div>
+                    <h3>Upload PDF Document</h3>
+                    <p>Drop your PDF here or click to browse</p>
+                    <input type="file" id="pdfInput" accept=".pdf" hidden>
+                </div>
+            </div>
+
+            <div class="upload-area" id="signatureUpload">
+                <div class="upload-content">
+                    <div class="upload-icon">✍️</div>
+                    <h3>Upload Signature Image</h3>
+                    <p>Drop your PNG signature here or click to browse</p>
+                    <input type="file" id="signatureInput" accept=".png,.jpg,.jpeg" hidden>
+                </div>
+            </div>
+        </div>
+
+        <div class="preview-section" id="previewSection" style="display: none;">
+            <div class="controls">
+                <h3>Position Your Signature</h3>
+                <div class="control-group">
+                    <label for="pageSelect">Page:</label>
+                    <select id="pageSelect"></select>
+                </div>
+                <div class="control-group">
+                    <label for="signatureSize">Size:</label>
+                    <input type="range" id="signatureSize" min="50" max="300" value="150">
+                    <span id="sizeValue">150px</span>
+                </div>
+                <div class="control-group">
+                    <label for="signatureOpacity">Opacity:</label>
+                    <input type="range" id="signatureOpacity" min="0.1" max="1" step="0.1" value="1">
+                    <span id="opacityValue">100%</span>
+                </div>
+            </div>
+
+            <div class="pdf-container">
+                <canvas id="pdfCanvas"></canvas>
+                <div id="signaturePreview" class="signature-preview"></div>
+            </div>
+
+            <div class="action-buttons">
+                <button id="downloadBtn" class="download-btn">
+                    💾 Download Signed PDF
+                </button>
+                <button id="resetBtn" class="reset-btn">
+                    🔄 Start Over
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Made with ❤️ and questionable life choices</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
